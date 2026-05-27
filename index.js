@@ -24,14 +24,14 @@ function requireTracksolidSignature(req, res, next) {
   // If it's a verification ping from Tracksolid (often has no signature or parameters)
   const hasParams = Object.keys(req.query).length > 0 || Object.keys(req.body).length > 0;
   if (!hasParams) {
-    return res.status(200).send('success');
+    return res.status(200).json({ code: 0, message: 'success' });
   }
 
   // If there's no sign in query or body, it might be a simple connection test
   const incomingSign = req.query.sign || req.body.sign || req.headers['x-sign'] || req.headers['sign'];
   if (!incomingSign) {
     console.log('[Verification Ping] Returning success for unsigned request');
-    return res.status(200).send('success');
+    return res.status(200).json({ code: 0, message: 'success' });
   }
 
   if (!verifySignature(req, APP_SECRET)) {
@@ -57,12 +57,12 @@ app.get('/health', (req, res) => {
  */
 app.get('/webhook/alarm', (req, res) => {
   console.log('Received GET verification ping on /webhook/alarm');
-  res.status(200).send('success');
+  res.status(200).json({ code: 0, message: 'success' });
 });
 
 app.get('/webhook/location', (req, res) => {
   console.log('Received GET verification ping on /webhook/location');
-  res.status(200).send('success');
+  res.status(200).json({ code: 0, message: 'success' });
 });
 
 /**
