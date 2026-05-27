@@ -1,10 +1,11 @@
+require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const { computeSignature } = require('./utils/signature');
 
 const MOCK_GPS_PORT = 4000;
 const MIDDLEWARE_PORT = 3000;
-const TEST_APP_SECRET = 'test_app_secret';
+const TEST_APP_SECRET = process.env.TRACKSOLID_APP_SECRET || 'test_app_secret';
 
 // 1. Start a mock GPS Server to receive forwarded requests
 const mockGpsServer = express();
