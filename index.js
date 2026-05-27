@@ -21,6 +21,19 @@ app.use((req, res, next) => {
 
 // Middleware to verify Tracksolid signature
 function requireTracksolidSignature(req, res, next) {
+  // If it's a verification ping from Tracksolid (often has no signature or parameters)
+  const hasParams = Object.keys(req.query).length > 0 || Object.keys(req.body).length > 0;
+  if (!hasParams) {
+    return res.status(200).send('success');
+  }
+
+  // If there's no sign in query or body, it might be a simple connection test
+  const incomingSign = req.query.sign || req.body.sign || req.headers['x-sign'] || req.headers['sign'];
+  if (!incomingSign) {
+    console.log('[Verification Ping] Returning success for unsigned request');
+    return res.status(200).send('success');
+  }
+
   if (!verifySignature(req, APP_SECRET)) {
     console.warn(`[Signature Failed] Unauthorized request to ${req.path}`);
     return res.status(401).json({
@@ -36,6 +49,20 @@ function requireTracksolidSignature(req, res, next) {
  */
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', time: new Date().toISOString() });
+});
+
+/**
+ * GET handlers for Webhook verification
+ * Tracksolid often pings webhooks with GET requests to verify they are active.
+ */
+app.get('/webhook/alarm', (req, res) => {
+  console.log('Received GET verification ping on /webhook/alarm');
+  res.status(200).send('success');
+});
+
+app.get('/webhook/location', (req, res) => {
+  console.log('Received GET verification ping on /webhook/location');
+  res.status(200).send('success');
 });
 
 /**
