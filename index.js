@@ -171,11 +171,14 @@ async function forwardTelemetry(payload, msgType = null) {
   } else {
     const isAccOn = payload.accStatus === '1' || payload.accStatus === 1 || String(payload.ignition).toUpperCase() === 'ON';
     const accVal = isAccOn ? 1 : 0;
-    const batpVal = payload.electQuantity !== undefined ? payload.electQuantity : 100;
-    const powerVal = payload.powerValue !== undefined ? payload.powerValue : '';
+    const batpVal = (payload.electQuantity !== undefined && payload.electQuantity !== null && payload.electQuantity !== '') ? payload.electQuantity : null;
+    const powerVal = (payload.powerValue !== undefined && payload.powerValue !== null && payload.powerValue !== '') ? payload.powerValue : null;
 
-    let paramsStr = `acc=${accVal}|batp=${batpVal}|`;
-    if (powerVal) {
+    let paramsStr = `acc=${accVal}|`;
+    if (batpVal !== null) {
+      paramsStr += `batp=${batpVal}|`;
+    }
+    if (powerVal !== null) {
       paramsStr += `voltage=${powerVal}|`;
     }
 
