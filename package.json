@@ -1,0 +1,19 @@
+{
+  "name": "tracksolid-gps-forwarder",
+  "version": "1.0.0",
+  "description": "Middleware to forward telemetry from Tracksolid Pro Webhooks to GPS Server Location API",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test:mock": "node test_mock.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "private": true
+}

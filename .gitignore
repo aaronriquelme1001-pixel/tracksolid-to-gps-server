@@ -1,0 +1,5 @@
+node_modules/
+.env
+*.log
+tracksolid_webhook_log.txt
+webhook_log.txt
