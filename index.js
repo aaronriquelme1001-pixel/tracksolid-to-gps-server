@@ -21,17 +21,16 @@ app.use((req, res, next) => {
 
 // Middleware to verify Tracksolid signature
 function requireTracksolidSignature(req, res, next) {
-  // If it's a verification ping from Tracksolid (often has no signature or parameters)
   const hasParams = Object.keys(req.query).length > 0 || Object.keys(req.body).length > 0;
   if (!hasParams) {
     return res.status(200).json({ code: 0, message: 'success' });
   }
 
-  // If there's no sign in query or body, it might be a simple connection test
   const incomingSign = req.query.sign || req.body.sign || req.headers['x-sign'] || req.headers['sign'];
   if (!incomingSign) {
-    console.log('[Verification Ping] Returning success for unsigned request');
-    return res.status(200).json({ code: 0, message: 'success' });
+    // If Tracksolid server doesn't include a signature, print warning and proceed to avoid blocking data
+    console.log('[Signature Warning] Missing signature on push, proceeding anyway.');
+    return next();
   }
 
   if (!verifySignature(req, APP_SECRET)) {
@@ -53,7 +52,6 @@ app.get('/health', (req, res) => {
 
 /**
  * GET handlers for Webhook verification
- * Tracksolid often pings webhooks with GET requests to verify they are active.
  */
 app.get('/webhook/alarm', (req, res) => {
   console.log('Received GET verification ping on /webhook/alarm');
@@ -66,132 +64,107 @@ app.get('/webhook/location', (req, res) => {
 });
 
 /**
- * Endpoint for Tracksolid real-time alarm pushes (jimi.push.device.alarm)
- * Tracksolid POSTs with query parameters for signature, and body with msgType and data.
+ * Unified request handler for both Webhooks.
+ * This makes it so it doesn't matter which URL you put in Tracksolid,
+ * the server will automatically parse it correctly based on the payload structure.
  */
-app.post('/webhook/alarm', requireTracksolidSignature, async (req, res) => {
+async function handleTracksolidPush(req, res) {
   try {
     const { msgType, data } = req.body;
-    console.log(`Received alarm webhook. Type: ${msgType}`);
 
-    if (!data) {
-      return res.status(400).json({ code: 1001, message: 'Missing data field in body' });
+    // If it's a verification test (no body/payload)
+    if (!msgType || !data) {
+      console.log('Received empty payload/verification ping on POST.');
+      return res.status(200).json({ code: 0, message: 'success' });
     }
 
-    // data is a JSON string representing the alarm event
-    const alarm = typeof data === 'string' ? JSON.parse(data) : data;
-    console.log('Alarm payload details:', alarm);
+    const payload = typeof data === 'string' ? JSON.parse(data) : data;
+    console.log(`\n--- New Telemetry Push (Type: ${msgType}) ---`);
+    console.log('Payload:', payload);
 
-    // Map Tracksolid alarms to GPS Server event names
-    // Mappings:
-    // "1" (SOS alert) -> "sos"
-    // "2" (Power cut off alert) -> "pwrcut"
-    // "14" (Low external power alert) -> "lowdc"
-    // "15" (Low power protection alert) -> "lowbat"
-    // "20" (Door detection alert) -> "door"
-    // "41" (Sudden Acceleration Alert) -> "haccel"
-    // "48" (Sudden Deceleration Alert) -> "hbrake"
-    const alarmTypeStr = String(alarm.alarmType || '');
-    let mappedEvent = 'alert';
-    if (alarmTypeStr === '1') mappedEvent = 'sos';
-    else if (alarmTypeStr === '2') mappedEvent = 'pwrcut';
-    else if (alarmTypeStr === '14') mappedEvent = 'lowdc';
-    else if (alarmTypeStr === '15') mappedEvent = 'lowbat';
-    else if (alarmTypeStr === '20') mappedEvent = 'door';
-    else if (alarmTypeStr === '41') mappedEvent = 'haccel';
-    else if (alarmTypeStr === '48') mappedEvent = 'hbrake';
-
-    // Format params string
-    const paramsStr = `alarm_type=${alarmTypeStr}|alarm_name=${alarm.alarmName || ''}|`;
-
-    // Map to GPS Server Location API GET parameters
-    const gpsParams = {
-      imei: alarm.imei,
-      dt: alarm.alarmTime || new Date().toISOString().replace('T', ' ').substring(0, 19),
-      lat: Number(alarm.lat || 0).toFixed(6),
-      lng: Number(alarm.lng || 0).toFixed(6),
+    let gpsParams = {
+      imei: payload.imei,
       altitude: 0,
-      angle: 0,
-      speed: 0,
-      loc_valid: 1,
-      params: paramsStr,
-      event: mappedEvent
+      loc_valid: 1
     };
 
-    console.log(`Forwarding alarm to GPS Server: ${GPS_SERVER_URL}`, gpsParams);
+    // Case 1: Alarm Push Event (jimi.push.device.alarm)
+    if (msgType === 'jimi.push.device.alarm' || payload.alarmType !== undefined) {
+      const alarmTypeStr = String(payload.alarmType || '');
+      
+      // Determine if it is ACC ON / OFF alarm
+      const isAccOff = alarmTypeStr === '1001' || String(payload.originalAlarmType).toUpperCase() === 'ACC_OFF';
+      const isAccOn = alarmTypeStr === '1002' || String(payload.originalAlarmType).toUpperCase() === 'ACC_ON';
+      
+      let mappedEvent = 'alert';
+      let accVal = 0;
+
+      if (isAccOff) {
+        mappedEvent = 'ignition_off';
+        accVal = 0;
+      } else if (isAccOn) {
+        mappedEvent = 'ignition_on';
+        accVal = 1;
+      } else if (alarmTypeStr === '1') {
+        mappedEvent = 'sos';
+      } else if (alarmTypeStr === '2') {
+        mappedEvent = 'pwrcut';
+      } else if (alarmTypeStr === '14') {
+        mappedEvent = 'lowdc';
+      } else if (alarmTypeStr === '15') {
+        mappedEvent = 'lowbat';
+      } else if (alarmTypeStr === '20') {
+        mappedEvent = 'door';
+      } else if (alarmTypeStr === '41') {
+        mappedEvent = 'haccel';
+      } else if (alarmTypeStr === '48') {
+        mappedEvent = 'hbrake';
+      }
+
+      gpsParams.dt = payload.alarmTime || new Date().toISOString().replace('T', ' ').substring(0, 19);
+      gpsParams.lat = Number(payload.lat || 0).toFixed(6);
+      gpsParams.lng = Number(payload.lng || 0).toFixed(6);
+      gpsParams.speed = Number(payload.speed || 0);
+      gpsParams.angle = Number(payload.direction || 0);
+      gpsParams.event = mappedEvent;
+      gpsParams.params = `acc=${accVal}|alarm_type=${alarmTypeStr}|alarm_name=${payload.alarmName || ''}|`;
+
+    // Case 2: Standard Location telemetry Push
+    } else {
+      const isAccOn = payload.accStatus === '1' || payload.accStatus === 1 || String(payload.ignition).toUpperCase() === 'ON';
+      const accVal = isAccOn ? 1 : 0;
+      const batpVal = payload.electQuantity !== undefined ? payload.electQuantity : 100;
+      const powerVal = payload.powerValue !== undefined ? payload.powerValue : '';
+
+      let paramsStr = `acc=${accVal}|batp=${batpVal}|`;
+      if (powerVal) {
+        paramsStr += `voltage=${powerVal}|`;
+      }
+
+      gpsParams.dt = payload.gpsTime || payload.hbTime || new Date().toISOString().replace('T', ' ').substring(0, 19);
+      gpsParams.lat = Number(payload.lat || 0).toFixed(6);
+      gpsParams.lng = Number(payload.lng || 0).toFixed(6);
+      gpsParams.speed = Number(payload.speed || 0);
+      gpsParams.angle = Number(payload.direction || 0);
+      gpsParams.event = null;
+      gpsParams.params = paramsStr;
+    }
+
+    console.log(`Forwarding to GPS Server: ${GPS_SERVER_URL}`, gpsParams);
     
-    // Call GPS Server api_loc.php (HTTP GET)
-    const response = await axios.get(GPS_SERVER_URL, { params: gpsParams });
-    console.log('GPS Server Response:', response.data);
-
-    res.json({ code: 0, message: 'Alarm forwarded successfully' });
-  } catch (error) {
-    console.error('Error handling alarm webhook:', error.message);
-    res.status(500).json({ code: -1, message: 'Internal server error: ' + error.message });
-  }
-});
-
-/**
- * Endpoint for Tracksolid real-time location/telemetry pushes
- */
-app.post('/webhook/location', requireTracksolidSignature, async (req, res) => {
-  try {
-    const { msgType, data } = req.body;
-    console.log(`Received location webhook. Type: ${msgType}`);
-
-    if (!data) {
-      return res.status(400).json({ code: 1001, message: 'Missing data field in body' });
-    }
-
-    const telemetry = typeof data === 'string' ? JSON.parse(data) : data;
-    console.log('Location payload details:', telemetry);
-
-    // Map ACC Status to digital input parameter (acc=1 or acc=0)
-    // accStatus can be '1' (ON) / '0' (OFF) or ignition can be 'ON' / 'OFF'
-    const isAccOn = telemetry.accStatus === '1' || telemetry.accStatus === 1 || String(telemetry.ignition).toUpperCase() === 'ON';
-    const accVal = isAccOn ? 1 : 0;
-    const batpVal = telemetry.electQuantity !== undefined ? telemetry.electQuantity : 100;
-    const powerVal = telemetry.powerValue !== undefined ? telemetry.powerValue : '';
-
-    let paramsStr = `acc=${accVal}|batp=${batpVal}|`;
-    if (powerVal) {
-      paramsStr += `voltage=${powerVal}|`;
-    }
-
-    // Determine event type if ACC changed
-    let mappedEvent = '';
-    // Optional ACC ON/OFF events
-    if (telemetry.accStatus !== undefined) {
-      // Mapped events: accStatus changes can trigger engine events if needed
-      // but standard updates can keep event empty/null
-    }
-
-    // Map to GPS Server Location API GET parameters
-    const gpsParams = {
-      imei: telemetry.imei,
-      dt: telemetry.gpsTime || telemetry.hbTime || new Date().toISOString().replace('T', ' ').substring(0, 19),
-      lat: Number(telemetry.lat || 0).toFixed(6),
-      lng: Number(telemetry.lng || 0).toFixed(6),
-      altitude: 0, // Tracksolid location doesn't expose altitude, defaulting to 0
-      angle: Number(telemetry.direction || 0),
-      speed: Number(telemetry.speed || 0),
-      loc_valid: 1,
-      params: paramsStr,
-      event: mappedEvent || null
-    };
-
-    console.log(`Forwarding telemetry to GPS Server: ${GPS_SERVER_URL}`, gpsParams);
-
     // Call GPS Server api_loc.php (HTTP GET)
     const response = await axios.get(GPS_SERVER_URL, { params: gpsParams });
     console.log('GPS Server Response:', response.data);
 
     res.json({ code: 0, message: 'Telemetry forwarded successfully' });
   } catch (error) {
-    console.error('Error handling location webhook:', error.message);
+    console.error('Error handling webhook push:', error.message);
     res.status(500).json({ code: -1, message: 'Internal server error: ' + error.message });
   }
-});
+}
+
+app.post('/webhook/alarm', requireTracksolidSignature, handleTracksolidPush);
+app.post('/webhook/location', requireTracksolidSignature, handleTracksolidPush);
 
 app.listen(PORT, () => {
   console.log(`===========================================================`);
