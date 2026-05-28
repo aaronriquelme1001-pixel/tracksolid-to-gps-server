@@ -17,7 +17,7 @@ const TRACKSOLID_USER_PWD_MD5 = process.env.TRACKSOLID_USER_PWD_MD5;
 const TRACKSOLID_APP_KEY = process.env.TRACKSOLID_APP_KEY;
 const TRACKSOLID_APP_SECRET = process.env.TRACKSOLID_APP_SECRET || APP_SECRET;
 const TRACKSOLID_IMEIS = process.env.TRACKSOLID_IMEIS;
-const TRACKSOLID_POLL_INTERVAL = parseInt(process.env.TRACKSOLID_POLL_INTERVAL || '30000', 10);
+const TRACKSOLID_POLL_INTERVAL = parseInt(process.env.TRACKSOLID_POLL_INTERVAL || '10000', 10);
 
 // Token Cache State
 let cachedToken = null;
