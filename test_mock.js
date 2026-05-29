@@ -7,6 +7,13 @@ const MOCK_GPS_PORT = 4000;
 const MIDDLEWARE_PORT = 3000;
 const TEST_APP_SECRET = process.env.TRACKSOLID_APP_SECRET || 'test_app_secret';
 
+// Override the port and target GPS server URL for local testing
+process.env.PORT = MIDDLEWARE_PORT;
+process.env.GPS_SERVER_URL = `http://localhost:${MOCK_GPS_PORT}/api/api_loc.php`;
+
+// Boot the middleware server in-process
+require('./index.js');
+
 // 1. Start a mock GPS Server to receive forwarded requests
 const mockGpsServer = express();
 mockGpsServer.get('/api/api_loc.php', (req, res) => {
@@ -102,5 +109,9 @@ async function runTests() {
   } finally {
     console.log('\n[Test Client] Tests finished. Shutting down Mock GPS Server...');
     server.close();
+    // Exit process since we booted the middleware in-process
+    setTimeout(() => {
+      process.exit(0);
+    }, 1000);
   }
 }

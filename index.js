@@ -212,7 +212,8 @@ async function forwardTelemetry(payload, msgType = null) {
   try {
     const response = await axios.get(GPS_SERVER_URL, { params: gpsParams, timeout: 5000 });
     console.log('GPS Server Response:', response.data);
-    lastForwardStatus = `Success: GPS Server replied "${response.data}" at ${new Date().toISOString()}`;
+    const respStr = typeof response.data === 'object' ? JSON.stringify(response.data) : response.data;
+    lastForwardStatus = `Success: GPS Server replied "${respStr}" at ${new Date().toISOString()}`;
   } catch (err) {
     console.error('GPS Server forward failed:', err.message);
     lastForwardStatus = `Failed: ${err.message} at ${new Date().toISOString()}`;
