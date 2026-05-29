@@ -23,6 +23,12 @@ const TRACKSOLID_POLL_INTERVAL = parseInt(process.env.TRACKSOLID_POLL_INTERVAL |
 let cachedToken = null;
 let tokenExpiresAt = null;
 
+// Diagnostics state
+let lastPollTime = null;
+let lastPollStatus = 'No runs yet';
+let lastForwardStatus = 'No runs yet';
+
+
 // Support both urlencoded and json payloads
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
@@ -76,9 +82,20 @@ app.get('/health', (req, res) => {
     status: 'OK',
     time: new Date().toISOString(),
     pollingActive: !!(TRACKSOLID_USER_ID && TRACKSOLID_APP_KEY && TRACKSOLID_APP_SECRET && TRACKSOLID_USER_PWD_MD5 && TRACKSOLID_IMEIS),
-    hasToken: !!cachedToken
+    hasToken: !!cachedToken,
+    config: {
+      gpsServerUrl: GPS_SERVER_URL,
+      targetImeis: TRACKSOLID_IMEIS,
+      pollIntervalMs: TRACKSOLID_POLL_INTERVAL
+    },
+    diagnostics: {
+      lastPollTime,
+      lastPollStatus,
+      lastForwardStatus
+    }
   });
 });
+
 
 /**
  * GET handlers for Webhook verification
@@ -192,8 +209,15 @@ async function forwardTelemetry(payload, msgType = null) {
   }
 
   console.log(`Forwarding to GPS Server: ${GPS_SERVER_URL}`, gpsParams);
-  const response = await axios.get(GPS_SERVER_URL, { params: gpsParams });
-  console.log('GPS Server Response:', response.data);
+  try {
+    const response = await axios.get(GPS_SERVER_URL, { params: gpsParams, timeout: 5000 });
+    console.log('GPS Server Response:', response.data);
+    lastForwardStatus = `Success: GPS Server replied "${response.data}" at ${new Date().toISOString()}`;
+  } catch (err) {
+    console.error('GPS Server forward failed:', err.message);
+    lastForwardStatus = `Failed: ${err.message} at ${new Date().toISOString()}`;
+    throw err;
+  }
 }
 
 /**
@@ -257,6 +281,7 @@ async function getTracksolidToken() {
  * Poll location updates for configured IMEIs
  */
 async function pollTracksolidLocations() {
+  lastPollTime = new Date().toISOString();
   try {
     const token = await getTracksolidToken();
     const imeisList = TRACKSOLID_IMEIS.split(',').map(s => s.trim());
@@ -293,12 +318,12 @@ async function pollTracksolidLocations() {
       // Result can be a single object or an array of device locations
       const devices = Array.isArray(res.data.result) ? res.data.result : [res.data.result];
       console.log(`[Tracksolid Poller] Successfully retrieved ${devices.length} locations.`);
+      lastPollStatus = `Success: retrieved ${devices.length} locations at ${new Date().toISOString()}`;
 
       for (const device of devices) {
         if (!device || !device.imei) continue;
         
         // Map to format expected by forwardTelemetry
-        // jimi.device.location.get returns fields like: lat, lng, speed, direction, accStatus, electQuantity, powerValue
         console.log(`[Tracksolid Poller] Processing location for IMEI ${device.imei}`);
         await forwardTelemetry(device);
       }
@@ -306,6 +331,7 @@ async function pollTracksolidLocations() {
       const code = res.data ? res.data.code : -1;
       const msg = res.data ? res.data.message : 'Unknown error';
       console.warn(`[Tracksolid Poller] API warning (Code: ${code}, Msg: ${msg})`);
+      lastPollStatus = `API Warning: Code ${code}, Msg: ${msg} at ${new Date().toISOString()}`;
       
       // If unauthorized token, invalidate token cache
       if (code === 1004 || String(msg).toLowerCase().includes('token')) {
@@ -316,6 +342,7 @@ async function pollTracksolidLocations() {
     }
   } catch (err) {
     console.error('[Tracksolid Poller] Polling cycle failed:', err.message);
+    lastPollStatus = `Failed: ${err.message} at ${new Date().toISOString()}`;
   }
 }
 
